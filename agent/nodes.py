@@ -2,6 +2,7 @@ import json
 from agent.state import AgentState
 from agent.llm import call_llm
 from agent.prompts import INTENT_PROMPT, PLANNER_PROMPT
+from agent.tools import execute_tool
 
 
 def _parse_json(text: str) -> dict:
@@ -71,11 +72,38 @@ def planner_node(state: AgentState) -> AgentState:
 
 
 def executor_node(state: AgentState) -> AgentState:
-    """节点3：执行工具（骨架，Day3实现）"""
+    """节点3：执行工具"""
     print("[ExecutorNode] 执行工具...")
-    state["tool_records"] = []
-    state["retrieved_docs"] = []
+    planned_tools = state.get("planned_tools", [])
+
+    tool_records = []
+    all_docs = []
+
+    for tool_call in planned_tools:
+        tool_name = tool_call.get("tool")
+        params = tool_call.get("params", {})
+
+        print(f"  调用 {tool_name}({params})...")
+        result = execute_tool(tool_name, params)
+
+        tool_records.append({
+            "tool_name": tool_name,
+            "input_params": params,
+            "status": result["status"],
+            "duration_ms": result["duration_ms"],
+            "result_count": len(result.get("results", [])),
+            "error": result.get("error")
+        })
+
+        if result["status"] == "success":
+            all_docs.extend(result.get("results", []))
+
+    state["tool_records"] = tool_records
+    state["retrieved_docs"] = all_docs
     state["step_count"] = state.get("step_count", 0) + 1
+
+    print(f"  工具调用：{len(tool_records)} 次")
+    print(f"  检索到：{len(all_docs)} 个片段")
     return state
 
 
