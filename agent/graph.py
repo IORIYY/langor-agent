@@ -29,13 +29,18 @@ def build_graph():
         status = state.get("review_result", {}).get("status", "fail")
         step_count = state.get("step_count", 0)
 
-        if step_count >= 8:
-            print("[Graph] 超过 8 轮，强制结束")
-            return "end"
+        # 超过 5 轮强制结束（7B 容易死循环）
+        if step_count >= 5:
+            print("[Graph] 超过 5 轮，强制结束")
+            return "output"  # 直接输出，用已有资料
 
         if status == "pass":
             return "output"
         elif status == "need_more_info":
+            # 已经补检索过一次了，第二次直接输出
+            if step_count >= 3:
+                print("[Graph] 补检索一次仍 need_more_info，直接输出")
+                return "output"
             return "planner"
         else:
             return "end"
