@@ -13,24 +13,26 @@ def build_graph():
     """构建 LangGraph 状态机"""
     graph = StateGraph(AgentState)
 
-    # 添加节点
     graph.add_node("intent", intent_node)
     graph.add_node("planner", planner_node)
     graph.add_node("executor", executor_node)
     graph.add_node("reviewer", reviewer_node)
     graph.add_node("output", output_formatter_node)
 
-    # 设置入口
     graph.set_entry_point("intent")
 
-    # 线性流转
     graph.add_edge("intent", "planner")
     graph.add_edge("planner", "executor")
     graph.add_edge("executor", "reviewer")
 
-    # Reviewer 三分支
     def route_after_review(state: AgentState) -> str:
         status = state.get("review_result", {}).get("status", "fail")
+        step_count = state.get("step_count", 0)
+
+        if step_count >= 8:
+            print("[Graph] 超过 8 轮，强制结束")
+            return "end"
+
         if status == "pass":
             return "output"
         elif status == "need_more_info":

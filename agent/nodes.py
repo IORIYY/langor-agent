@@ -1,7 +1,12 @@
 import json
 from agent.state import AgentState
 from agent.llm import call_llm
-from agent.prompts import INTENT_PROMPT, PLANNER_PROMPT
+from agent.prompts import (
+    INTENT_PROMPT,
+    PLANNER_PROMPT,
+    REVIEWER_PROMPT,
+    OUTPUT_PROMPT,
+)
 from agent.tools import execute_tool
 
 
@@ -108,17 +113,67 @@ def executor_node(state: AgentState) -> AgentState:
 
 
 def reviewer_node(state: AgentState) -> AgentState:
-    """节点4：独立评审（骨架，Day4实现）"""
+    """节点4：独立评审"""
     print("[ReviewerNode] 评审结果...")
-    state["review_result"] = {"status": "pass", "reason": "骨架"}
+    query = state["user_query"]
+    docs = state.get("retrieved_docs", [])
+
+    if not docs:
+        state["review_result"] = {"status": "fail", "reason": "无检索结果"}
+        state["step_count"] = state.get("step_count", 0) + 1
+        print("  评审：fail（无检索结果）")
+        return state
+
+    context_parts = []
+    for d in docs:
+        context_parts.append(f"【{d['source']}】\n{d['content']}")
+    context = "\n\n".join(context_parts)
+
+    prompt = REVIEWER_PROMPT.replace("__QUERY__", query).replace("__CONTEXT__", context)
+
+    try:
+        output = call_llm(prompt)
+        parsed = _parse_json(output)
+    except Exception as e:
+        print(f"[ReviewerNode错误] {e}")
+        parsed = {"status": "pass", "reason": "解析失败，默认通过"}
+
+    state["review_result"] = parsed
     state["step_count"] = state.get("step_count", 0) + 1
+
+    print(f"  评审：{parsed.get('status')} - {parsed.get('reason', '')[:50]}")
     return state
 
 
 def output_formatter_node(state: AgentState) -> AgentState:
-    """节点5：格式化输出（骨架，Day4实现）"""
+    """节点5：格式化输出"""
     print("[OutputFormatterNode] 格式化输出...")
-    state["final_answer"] = "骨架输出"
-    state["sources"] = []
+    query = state["user_query"]
+    docs = state.get("retrieved_docs", [])
+
+    if not docs:
+        state["final_answer"] = "资料不足，无法生成报告。建议人工排查。"
+        state["sources"] = []
+        state["step_count"] = state.get("step_count", 0) + 1
+        return state
+
+    context_parts = []
+    sources = []
+    for d in docs:
+        context_parts.append(f"【{d['source']}】\n{d['content']}")
+        sources.append(d["source"])
+    context = "\n\n".join(context_parts)
+
+    prompt = OUTPUT_PROMPT.replace("__QUERY__", query).replace("__CONTEXT__", context)
+
+    try:
+        answer = call_llm(prompt)
+    except Exception as e:
+        answer = f"生成报告失败：{e}"
+
+    state["final_answer"] = answer
+    state["sources"] = list(set(sources))
     state["step_count"] = state.get("step_count", 0) + 1
+
+    print(f"  报告长度：{len(answer)} 字")
     return state
