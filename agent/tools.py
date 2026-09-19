@@ -4,6 +4,7 @@ from retrieval.fusion import hybrid_search
 from agent.tool_registry import register_tool, execute_tool, list_tools, get_tools_for_planner
 
 TICKETS_DB = "data/tickets.db"
+BOM_DB = "data/bom.db"
 
 
 @register_tool(
@@ -98,9 +99,9 @@ def workorder_analysis(stat_type: str = "summary", top_n: int = 5) -> dict:
     """工具3：工单统计分析"""
     # 宽容处理：把 Planner 可能传的各种值标准化
     stat_type = (stat_type or "summary").lower()
-    if "fault" in stat_type:
+    if "fault" in stat_type or "故障" in stat_type or "frequency" in stat_type:
         stat_type = "fault_top"
-    elif "device" in stat_type:
+    elif "device" in stat_type or "设备" in stat_type:
         stat_type = "device_top"
     else:
         stat_type = "summary"
@@ -171,6 +172,70 @@ def workorder_analysis(stat_type: str = "summary", top_n: int = 5) -> dict:
         }
 
 
+@register_tool(
+    name="bom_version_trace",
+    description="查询产品 BOM 版本、工艺变更记录、批次差异",
+    params_schema={
+        "product_code": "产品型号/编码（如 LBE-2000、直流屏-DC110）",
+        "need_version_compare": "是否对比历史版本（true/false，默认 false）"
+    }
+)
+def bom_version_trace(product_code: str, need_version_compare: bool = False) -> dict:
+    """工具4：BOM 工艺版本追溯"""
+    try:
+        conn = sqlite3.connect(BOM_DB)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT version, change_note, components, created_at
+            FROM bom_versions
+            WHERE product_code = ?
+            ORDER BY version
+        """, (product_code,))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            return {
+                "status": "success",
+                "results": [],
+                "error": None
+            }
+
+        results = []
+
+        if need_version_compare:
+            text = f"{product_code} 版本变更历史：\n"
+            for i, (ver, note, comp, date) in enumerate(rows, 1):
+                text += f"\n【{ver}】（{date}）\n  变更：{note}\n  物料：{comp}"
+            results.append({
+                "content": text.strip(),
+                "source": f"BOM-{product_code}-版本对比",
+                "score": 1.0
+            })
+        else:
+            ver, note, comp, date = rows[-1]
+            text = f"{product_code} 最新版本：{ver}（{date}）\n变更：{note}\n物料清单：{comp}"
+            results.append({
+                "content": text,
+                "source": f"BOM-{product_code}-最新版本",
+                "score": 1.0
+            })
+
+        return {
+            "status": "success",
+            "results": results,
+            "error": None
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "results": []
+        }
+
+
 if __name__ == "__main__":
     print("=== 已注册工具 ===")
     for t in list_tools():
@@ -186,3 +251,9 @@ if __name__ == "__main__":
     r = execute_tool("fault_case_match", {"fault_phenomenon": "均衡电流异常"})
     print(f"状态：{r['status']}")
     print(f"结果数：{len(r['results'])}")
+
+    print("\n=== 测试 bom_version_trace ===")
+    r = execute_tool("bom_version_trace", {"product_code": "LBE-2000"})
+    print(f"状态：{r['status']}")
+    for item in r["results"]:
+        print(f"\n{item['content']}")

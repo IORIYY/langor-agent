@@ -5,12 +5,14 @@ INTENT_PROMPT = """你是工业设备运维 Agent 的意图解析器。
 意图类型：
 - fault：故障诊断（包含故障现象描述）
 - workorder：工单分析（请求统计/分类/趋势）
+- bom：BOM 工艺查询（请求版本/变更/差异）
 - knowledge：知识问答（参数/保养/告警含义）
 - boundary：无关问题（闲聊、天气等）
 
 同时提取关键实体：
 - device_model：设备型号（如 LBE-2000）
 - fault_phenomenon：故障现象
+- product_code：产品型号（BOM 查询用）
 
 只输出 JSON，不要其他内容。
 
@@ -35,13 +37,15 @@ PLANNER_PROMPT = """你是工业设备运维 Agent 的任务规划器。
 - rag_search：检索知识库（参数：query）
 - fault_case_match：匹配历史故障案例（参数：fault_phenomenon, device_model）
 - workorder_analysis：工单统计分析（参数：stat_type, top_n）
+- bom_version_trace：BOM 工艺版本追溯（参数：product_code, need_version_compare）
 
 规则：
 1. 只输出任务计划和工具调用计划，不输出任何业务答案
-2. 故障诊断类问题必须规划：检索手册 + 匹配历史案例
+2. 故障诊断类问题必须规划：rag_search + fault_case_match
 3. 简单知识查询只规划 rag_search
 4. 工单统计类问题规划 workorder_analysis
-5. 每个子任务明确指定工具和入参
+5. BOM/工艺查询规划 bom_version_trace
+6. 每个子任务明确指定工具和入参
 
 只输出 JSON。
 
@@ -58,6 +62,7 @@ PLANNER_PROMPT = """你是工业设备运维 Agent 的任务规划器。
 意图：__INTENT__
 实体：__ENTITIES__
 """
+
 
 REVIEWER_PROMPT = """你是工业设备运维 Agent 的独立评审节点。
 
@@ -77,6 +82,7 @@ REVIEWER_PROMPT = """你是工业设备运维 Agent 的独立评审节点。
 - 资料有重复是正常的，不影响判定
 - 资料包含多个设备是正常的，只要能找到相关内容就算 pass
 - 不要因为「缺少参数细节」就判定 need_more_info
+- 工单统计数据和 BOM 数据也算有效资料
 
 只输出 JSON，不要其他内容。
 

@@ -169,7 +169,7 @@ def output_formatter_node(state: AgentState) -> AgentState:
         sources.append(d["source"])
     context = "\n\n".join(context_parts)
 
-    # 根据意图选不同 Prompt
+    # 按意图选不同 Prompt
     if intent == "workorder":
         prompt = f"""你是工业设备运维 Agent 的报告生成器。
 
@@ -187,6 +187,27 @@ def output_formatter_node(state: AgentState) -> AgentState:
 
 用户问题：{query}
 统计数据：
+{context}
+"""
+    elif intent == "bom":
+        prompt = f"""你是工业设备运维 Agent 的报告生成器。
+
+请基于以下 BOM 工艺数据，生成简洁的版本查询报告。
+
+要求：
+1. 只使用资料中的信息，不要编造
+2. 输出格式：
+   - 【产品型号】
+   - 【最新版本】版本号 + 变更说明
+   - 【物料清单】如涉及
+   - 【版本变更历史】如涉及对比
+   - 【来源】数据来源
+3. 不要输出「排查步骤」「安全提示」这些诊断类内容
+4. 用简洁中文，控制在 300 字以内
+5. 直接输出报告，不要复述指令
+
+用户问题：{query}
+BOM 数据：
 {context}
 """
     else:
