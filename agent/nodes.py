@@ -91,7 +91,7 @@ def executor_node(state: AgentState) -> AgentState:
 
         print(f"  调用 {tool_name}({params})...")
         result = execute_tool(tool_name, params)
-        print(f"  [DEBUG] result = {result}")  
+        
 
         status = result.get("status", "unknown")
         results = result.get("results", [])
