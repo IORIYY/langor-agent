@@ -129,7 +129,58 @@ def ask(question: str) -> dict:
         "blocked": False,
         "reason": "out_of_scope"
     }
+def ask_stream(question: str):
+    """流式版 ask，yield 回答片段"""
+    # 敏感词
+    if _check_sensitive(question):
+        yield REFUSAL_ANSWER
+        return
 
+    # 检索
+    results = retrieve_with_filter(question, top_k=TOP_K, max_score=WEAK_THRESHOLD)
+    strong = [r for r in results if r["score"] <= STRONG_THRESHOLD]
+    weak = [r for r in results if STRONG_THRESHOLD < r["score"] <= WEAK_THRESHOLD]
+
+    # 无关
+    if not strong and not weak:
+        yield GUIDE_ANSWER
+        return
+
+    # 拼 Prompt
+    if strong:
+        context, _ = _build_context(strong)
+        prompt = f"""{SYSTEM_PROMPT}
+
+参考资料：
+{context}
+
+工程师的问题：{question}
+"""
+    else:
+        context, _ = _build_context(weak)
+        prompt = f"""你是工业设备运维助手。
+
+工程师的问题和知识库相关性不高，但有一些相关片段。请这样回答：
+- 先说明"我手头资料没写太细"
+- 如果有相关片段，简要分享
+- 建议咨询资深工程师或设备厂家
+- 末尾附来源文件名
+
+参考资料：
+{context}
+
+工程师的问题：{question}
+"""
+
+    # 流式调用
+    stream = ollama.chat(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        stream=True
+    )
+    for chunk in stream:
+        if chunk["message"]["content"]:
+            yield chunk["message"]["content"]
 
 if __name__ == "__main__":
     tests = [
