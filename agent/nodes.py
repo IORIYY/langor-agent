@@ -104,7 +104,8 @@ def executor_node(state: AgentState) -> AgentState:
             "error": result.get("error")
         })
 
-        if status == "success":
+               # success 和 fallback 都算有效返回（fallback 可能没结果）
+        if status in ("success", "fallback"):
             all_docs.extend(results)
 
     state["tool_records"] = tool_records

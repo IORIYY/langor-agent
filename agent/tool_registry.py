@@ -15,11 +15,6 @@ TOOL_REGISTRY = {}
 def register_tool(name: str, description: str = "", params_schema: dict = None):
     """
     装饰器：注册工具。
-
-    用法：
-    @register_tool(name="rag_search", description="检索知识库", params_schema={...})
-    def rag_search(query: str, top_k: int = 3) -> dict:
-        ...
     """
     def decorator(func: Callable):
         TOOL_REGISTRY[name] = {
@@ -56,6 +51,9 @@ def execute_tool(tool_name: str, params: dict) -> dict:
         "error": None,
         "retry_count": 0
     }
+
+    重要：fallback 和 success 一样，都视为「有效返回」，
+    主流程不中断。
     """
     start = time.time()
 
@@ -79,6 +77,9 @@ def execute_tool(tool_name: str, params: dict) -> dict:
             result = func(**params)
             result["duration_ms"] = int((time.time() - start) * 1000)
             result["retry_count"] = attempt
+            # 确保 status 字段存在
+            if "status" not in result:
+                result["status"] = "success"
             return result
         except Exception as e:
             last_error = str(e)
@@ -86,20 +87,19 @@ def execute_tool(tool_name: str, params: dict) -> dict:
             if attempt < max_retries:
                 time.sleep(0.5)
 
-    # 全部重试失败 → 降级
+    # 全部重试失败 → 降级返回（不让 Agent 崩溃）
     return {
-        "status": "error",
+        "status": "fallback",
         "error": last_error,
         "results": [],
         "duration_ms": int((time.time() - start) * 1000),
-        "retry_count": max_retries
+        "retry_count": max_retries,
+        "fallback_reason": "max_retries_exceeded"
     }
 
 
 def get_tools_for_planner() -> str:
-    """
-    生成给 Planner 看的工具描述文本。
-    """
+    """生成给 Planner 看的工具描述文本"""
     lines = []
     for t in TOOL_REGISTRY.values():
         lines.append(f"- {t['name']}：{t['description']}")
