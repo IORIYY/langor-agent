@@ -42,14 +42,10 @@ def rag_search(query: str, top_k: int = 3) -> dict:
 )
 def fault_case_match(fault_phenomenon: str, device_model: str = None, top_k: int = 2) -> dict:
     """工具2：历史故障案例匹配（SQLite）"""
-    if not sqlite3:
-        return {"status": "error", "error": "sqlite3 未加载", "results": []}
-
     try:
         conn = sqlite3.connect(TICKETS_DB)
         cursor = conn.cursor()
 
-        # 按故障现象模糊匹配
         query = """
             SELECT ticket_no, device_model, fault_phenomenon, root_cause, solution
             FROM tickets
@@ -90,14 +86,103 @@ def fault_case_match(fault_phenomenon: str, device_model: str = None, top_k: int
         }
 
 
+@register_tool(
+    name="workorder_analysis",
+    description="工单统计分析，返回故障 TOP、设备 TOP、总数",
+    params_schema={
+        "stat_type": "统计类型：fault_top/device_top/summary（默认 summary）",
+        "top_n": "返回前 N 条，默认 5"
+    }
+)
+def workorder_analysis(stat_type: str = "summary", top_n: int = 5) -> dict:
+    """工具3：工单统计分析"""
+    # 宽容处理：把 Planner 可能传的各种值标准化
+    stat_type = (stat_type or "summary").lower()
+    if "fault" in stat_type:
+        stat_type = "fault_top"
+    elif "device" in stat_type:
+        stat_type = "device_top"
+    else:
+        stat_type = "summary"
+
+    try:
+        conn = sqlite3.connect(TICKETS_DB)
+        cursor = conn.cursor()
+
+        results = []
+
+        if stat_type in ("fault_top", "summary"):
+            cursor.execute("""
+                SELECT fault_phenomenon, COUNT(*) as cnt
+                FROM tickets
+                GROUP BY fault_phenomenon
+                ORDER BY cnt DESC
+                LIMIT ?
+            """, (top_n,))
+            fault_rows = cursor.fetchall()
+            fault_text = "故障 TOP：\n"
+            for i, (fault, cnt) in enumerate(fault_rows, 1):
+                fault_text += f"  {i}. {fault}（{cnt} 次）\n"
+            results.append({
+                "content": fault_text.strip(),
+                "source": "工单统计-故障TOP",
+                "score": 1.0
+            })
+
+        if stat_type in ("device_top", "summary"):
+            cursor.execute("""
+                SELECT device_model, COUNT(*) as cnt
+                FROM tickets
+                GROUP BY device_model
+                ORDER BY cnt DESC
+                LIMIT ?
+            """, (top_n,))
+            device_rows = cursor.fetchall()
+            device_text = "设备 TOP：\n"
+            for i, (dm, cnt) in enumerate(device_rows, 1):
+                device_text += f"  {i}. {dm}（{cnt} 单）\n"
+            results.append({
+                "content": device_text.strip(),
+                "source": "工单统计-设备TOP",
+                "score": 1.0
+            })
+
+        if stat_type == "summary":
+            cursor.execute("SELECT COUNT(*) FROM tickets")
+            total = cursor.fetchone()[0]
+            results.append({
+                "content": f"工单总数：{total} 单",
+                "source": "工单统计-汇总",
+                "score": 1.0
+            })
+
+        conn.close()
+
+        return {
+            "status": "success",
+            "results": results,
+            "error": None
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "results": []
+        }
+
+
 if __name__ == "__main__":
     print("=== 已注册工具 ===")
     for t in list_tools():
         print(f"- {t['name']}: {t['description']}")
 
+    print("\n=== 测试 workorder_analysis ===")
+    r = execute_tool("workorder_analysis", {"stat_type": "summary"})
+    print(f"状态：{r['status']}")
+    for item in r["results"]:
+        print(f"\n{item['content']}")
+
     print("\n=== 测试 fault_case_match ===")
     r = execute_tool("fault_case_match", {"fault_phenomenon": "均衡电流异常"})
     print(f"状态：{r['status']}")
     print(f"结果数：{len(r['results'])}")
-    for item in r["results"]:
-        print(f"  {item['content'][:60]}...")

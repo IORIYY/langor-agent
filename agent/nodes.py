@@ -91,7 +91,6 @@ def executor_node(state: AgentState) -> AgentState:
 
         print(f"  调用 {tool_name}({params})...")
         result = execute_tool(tool_name, params)
-        
 
         status = result.get("status", "unknown")
         results = result.get("results", [])
@@ -154,6 +153,7 @@ def output_formatter_node(state: AgentState) -> AgentState:
     """节点5：格式化输出"""
     print("[OutputFormatterNode] 格式化输出...")
     query = state["user_query"]
+    intent = state.get("intent_type", "fault")
     docs = state.get("retrieved_docs", [])
 
     if not docs:
@@ -169,7 +169,28 @@ def output_formatter_node(state: AgentState) -> AgentState:
         sources.append(d["source"])
     context = "\n\n".join(context_parts)
 
-    prompt = OUTPUT_PROMPT.replace("__QUERY__", query).replace("__CONTEXT__", context)
+    # 根据意图选不同 Prompt
+    if intent == "workorder":
+        prompt = f"""你是工业设备运维 Agent 的报告生成器。
+
+请基于以下工单统计数据，生成简洁的统计报告。
+
+要求：
+1. 只使用资料中的信息，不要编造
+2. 输出格式：
+   - 【统计结果】列出 TOP 故障 / 设备
+   - 【简要分析】1-2 句话
+   - 【来源】数据来源
+3. 不要输出「排查步骤」「所需配件」「安全提示」这些诊断类内容
+4. 用简洁中文，控制在 300 字以内
+5. 直接输出报告，不要复述指令
+
+用户问题：{query}
+统计数据：
+{context}
+"""
+    else:
+        prompt = OUTPUT_PROMPT.replace("__QUERY__", query).replace("__CONTEXT__", context)
 
     try:
         answer = call_llm(prompt)

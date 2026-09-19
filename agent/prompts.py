@@ -33,13 +33,15 @@ PLANNER_PROMPT = """你是工业设备运维 Agent 的任务规划器。
 
 可用工具：
 - rag_search：检索知识库（参数：query）
-- fault_case_match：匹配历史故障案例（参数：fault_phenomenon）
+- fault_case_match：匹配历史故障案例（参数：fault_phenomenon, device_model）
+- workorder_analysis：工单统计分析（参数：stat_type, top_n）
 
 规则：
 1. 只输出任务计划和工具调用计划，不输出任何业务答案
 2. 故障诊断类问题必须规划：检索手册 + 匹配历史案例
 3. 简单知识查询只规划 rag_search
-4. 每个子任务明确指定工具和入参
+4. 工单统计类问题规划 workorder_analysis
+5. 每个子任务明确指定工具和入参
 
 只输出 JSON。
 
@@ -56,7 +58,6 @@ PLANNER_PROMPT = """你是工业设备运维 Agent 的任务规划器。
 意图：__INTENT__
 实体：__ENTITIES__
 """
-
 
 REVIEWER_PROMPT = """你是工业设备运维 Agent 的独立评审节点。
 
