@@ -169,7 +169,6 @@ def output_formatter_node(state: AgentState) -> AgentState:
         sources.append(d["source"])
     context = "\n\n".join(context_parts)
 
-    # 按意图选不同 Prompt
     if intent == "workorder":
         prompt = f"""你是工业设备运维 Agent 的报告生成器。
 

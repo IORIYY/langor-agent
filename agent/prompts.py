@@ -38,10 +38,11 @@ PLANNER_PROMPT = """你是工业设备运维 Agent 的任务规划器。
 - fault_case_match：匹配历史故障案例（参数：fault_phenomenon, device_model）
 - workorder_analysis：工单统计分析（参数：stat_type, top_n）
 - bom_version_trace：BOM 工艺版本追溯（参数：product_code, need_version_compare）
+- wecom_chat_fetch：企业微信聊天经验检索（参数：query, top_k）
 
 规则：
 1. 只输出任务计划和工具调用计划，不输出任何业务答案
-2. 故障诊断类问题必须规划：rag_search + fault_case_match
+2. 故障诊断类问题规划：rag_search + fault_case_match + wecom_chat_fetch
 3. 简单知识查询只规划 rag_search
 4. 工单统计类问题规划 workorder_analysis
 5. BOM/工艺查询规划 bom_version_trace
@@ -83,6 +84,7 @@ REVIEWER_PROMPT = """你是工业设备运维 Agent 的独立评审节点。
 - 资料包含多个设备是正常的，只要能找到相关内容就算 pass
 - 不要因为「缺少参数细节」就判定 need_more_info
 - 工单统计数据和 BOM 数据也算有效资料
+- 企业微信聊天经验也算有效资料
 
 只输出 JSON，不要其他内容。
 

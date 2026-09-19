@@ -5,6 +5,7 @@ from agent.tool_registry import register_tool, execute_tool, list_tools, get_too
 
 TICKETS_DB = "data/tickets.db"
 BOM_DB = "data/bom.db"
+WECOM_DB = "data/wecom.db"
 
 
 @register_tool(
@@ -97,7 +98,6 @@ def fault_case_match(fault_phenomenon: str, device_model: str = None, top_k: int
 )
 def workorder_analysis(stat_type: str = "summary", top_n: int = 5) -> dict:
     """工具3：工单统计分析"""
-    # 宽容处理：把 Planner 可能传的各种值标准化
     stat_type = (stat_type or "summary").lower()
     if "fault" in stat_type or "故障" in stat_type or "frequency" in stat_type:
         stat_type = "fault_top"
@@ -236,6 +236,54 @@ def bom_version_trace(product_code: str, need_version_compare: bool = False) -> 
         }
 
 
+@register_tool(
+    name="wecom_chat_fetch",
+    description="从企业微信售后群聊天记录中检索排障经验",
+    params_schema={
+        "query": "检索关键词",
+        "top_k": "返回条数，默认 2"
+    }
+)
+def wecom_chat_fetch(query: str, top_k: int = 2) -> dict:
+    """工具5：企业微信聊天经验检索（mock SQLite）"""
+    try:
+        conn = sqlite3.connect(WECOM_DB)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT msg_id, sender, send_time, content
+            FROM wecom_messages
+            WHERE is_effective = 1 AND reviewed = 1
+              AND content LIKE ?
+            ORDER BY send_time DESC
+            LIMIT ?
+        """, (f"%{query}%", top_k))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        results = []
+        for msg_id, sender, send_time, content in rows:
+            results.append({
+                "content": f"【{sender} {send_time}】{content}",
+                "source": f"企业微信-{msg_id}",
+                "score": 1.0
+            })
+
+        return {
+            "status": "success",
+            "results": results,
+            "error": None
+        }
+    except Exception as e:
+        return {
+            "status": "fallback",
+            "results": [],
+            "error": f"企业微信数据不可用：{str(e)}",
+            "fallback_reason": "wecom_db_unavailable"
+        }
+
+
 if __name__ == "__main__":
     print("=== 已注册工具 ===")
     for t in list_tools():
@@ -257,3 +305,10 @@ if __name__ == "__main__":
     print(f"状态：{r['status']}")
     for item in r["results"]:
         print(f"\n{item['content']}")
+
+    print("\n=== 测试 wecom_chat_fetch ===")
+    r = execute_tool("wecom_chat_fetch", {"query": "均衡电流"})
+    print(f"状态：{r['status']}")
+    print(f"结果数：{len(r['results'])}")
+    for item in r["results"]:
+        print(f"  {item['content']}")
