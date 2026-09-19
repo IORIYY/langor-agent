@@ -7,7 +7,8 @@ from agent.prompts import (
     REVIEWER_PROMPT,
     OUTPUT_PROMPT,
 )
-from agent.tools import execute_tool
+from agent.tool_registry import execute_tool
+import agent.tools  # 触发 @register_tool 装饰器
 
 
 def _parse_json(text: str) -> dict:
@@ -90,18 +91,22 @@ def executor_node(state: AgentState) -> AgentState:
 
         print(f"  调用 {tool_name}({params})...")
         result = execute_tool(tool_name, params)
+        print(f"  [DEBUG] result = {result}")  
+
+        status = result.get("status", "unknown")
+        results = result.get("results", [])
 
         tool_records.append({
             "tool_name": tool_name,
             "input_params": params,
-            "status": result["status"],
-            "duration_ms": result["duration_ms"],
-            "result_count": len(result.get("results", [])),
+            "status": status,
+            "duration_ms": result.get("duration_ms", 0),
+            "result_count": len(results),
             "error": result.get("error")
         })
 
-        if result["status"] == "success":
-            all_docs.extend(result.get("results", []))
+        if status == "success":
+            all_docs.extend(results)
 
     state["tool_records"] = tool_records
     state["retrieved_docs"] = all_docs
