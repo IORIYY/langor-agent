@@ -27,5 +27,9 @@ class AgentState(TypedDict, total=False):
     step_count: int
     error: Optional[str]
 
-    # 多轮对话记忆（新增）
+    # 拦截
+    blocked: bool
+    blocked_reason: str
+
+    # 多轮对话记忆
     chat_history: list

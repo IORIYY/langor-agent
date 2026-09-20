@@ -21,7 +21,21 @@ def build_graph():
 
     graph.set_entry_point("intent")
 
-    graph.add_edge("intent", "planner")
+    def route_after_intent(state: AgentState) -> str:
+        if state.get("blocked"):
+            print("[Graph] 敏感词拦截，跳过后续节点")
+            return "end"
+        return "planner"
+
+    graph.add_conditional_edges(
+        "intent",
+        route_after_intent,
+        {
+            "planner": "planner",
+            "end": END,
+        }
+    )
+
     graph.add_edge("planner", "executor")
     graph.add_edge("executor", "reviewer")
 
@@ -29,15 +43,13 @@ def build_graph():
         status = state.get("review_result", {}).get("status", "fail")
         step_count = state.get("step_count", 0)
 
-        # 超过 5 轮强制结束（7B 容易死循环）
         if step_count >= 5:
             print("[Graph] 超过 5 轮，强制结束")
-            return "output"  # 直接输出，用已有资料
+            return "output"
 
         if status == "pass":
             return "output"
         elif status == "need_more_info":
-            # 已经补检索过一次了，第二次直接输出
             if step_count >= 3:
                 print("[Graph] 补检索一次仍 need_more_info，直接输出")
                 return "output"
@@ -63,4 +75,3 @@ def build_graph():
 if __name__ == "__main__":
     app = build_graph()
     print("LangGraph 状态机构建成功")
-    print("节点列表：intent → planner → executor → reviewer → output")

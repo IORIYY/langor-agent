@@ -42,10 +42,28 @@ def _format_history(chat_history: list, max_turns: int = 3) -> str:
     return "\n".join(lines)
 
 
+SENSITIVE_WORDS = ["炸", "自杀", "毒品", "代考", "作弊", "黑客", "杀人"]
+
+
 def intent_node(state: AgentState) -> AgentState:
-    """节点1：意图解析"""
+    """节点1：意图解析（含敏感词前置拦截）"""
     print("[IntentNode] 解析意图...")
     query = state["user_query"]
+
+    # 敏感词前置拦截
+    if any(w in query for w in SENSITIVE_WORDS):
+        print(f"  [敏感词拦截] {query}")
+        state["intent_type"] = "boundary"
+        state["extracted_entities"] = {}
+        state["final_answer"] = "这个问题我不太方便回答。如果有设备故障或运维问题，可以换个问题问我。"
+        state["blocked"] = True
+        state["blocked_reason"] = "sensitive"
+        state["retrieved_docs"] = []
+        state["sources"] = []
+        state["step_count"] = state.get("step_count", 0) + 1
+        return state
+
+    history = state.get("chat_history", [])
     history = state.get("chat_history", [])
 
     history_text = _format_history(history)
