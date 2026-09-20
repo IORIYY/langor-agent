@@ -283,7 +283,110 @@ def wecom_chat_fetch(query: str, top_k: int = 2) -> dict:
             "fallback_reason": "wecom_db_unavailable"
         }
 
+MEMORY_DB = "data/memory.db"
 
+
+@register_tool(
+    name="memory_search",
+    description="从长期记忆中检索相似故障的处理方案（Agent 自己沉淀的经验）",
+    params_schema={
+        "fault_phenomenon": "故障现象描述",
+        "device_model": "设备型号（可选）",
+        "top_k": "返回条数，默认 2"
+    }
+)
+def memory_search(fault_phenomenon: str, device_model: str = None, top_k: int = 2) -> dict:
+    """工具6：长期记忆检索"""
+    try:
+        conn = sqlite3.connect(MEMORY_DB)
+        cursor = conn.cursor()
+
+        query = """
+            SELECT id, device_model, fault_phenomenon, solution, confidence, access_count
+            FROM memory
+            WHERE fault_phenomenon LIKE ?
+        """
+        params = [f"%{fault_phenomenon}%"]
+
+        if device_model:
+            query += " AND device_model = ?"
+            params.append(device_model)
+
+        query += " ORDER BY confidence DESC, access_count DESC LIMIT ?"
+        params.append(top_k)
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        # 更新访问计数
+        if rows:
+            ids = [row[0] for row in rows]
+            placeholders = ",".join("?" * len(ids))
+            cursor.execute(
+                f"UPDATE memory SET access_count = access_count + 1, last_accessed_at = datetime('now') WHERE id IN ({placeholders})",
+                ids
+            )
+            conn.commit()
+
+        conn.close()
+
+        results = []
+        for row in rows:
+            mid, dm, fp, sol, conf, cnt = row
+            results.append({
+                "content": f"【记忆 #{mid}】{dm or '通用'}｜{fp}\n方案：{sol}",
+                "source": f"长期记忆 #{mid}",
+                "score": conf
+            })
+
+        return {
+            "status": "success",
+            "results": results,
+            "error": None
+        }
+    except Exception as e:
+        return {
+            "status": "fallback",
+            "results": [],
+            "error": f"记忆库不可用：{str(e)}"
+        }
+
+
+def memory_save(device_model: str, fault_phenomenon: str, solution: str,
+                source_ticket: str = None, confidence: float = 0.8) -> int:
+    """
+    写入长期记忆（非工具，由系统在 Agent 输出后调用）。
+
+    返回新记录 ID。
+    """
+    conn = sqlite3.connect(MEMORY_DB)
+    cursor = conn.cursor()
+
+    # 去重检查：相同故障现象 + 设备型号，更新而非新增
+    cursor.execute("""
+        SELECT id FROM memory
+        WHERE fault_phenomenon = ? AND (device_model = ? OR (device_model IS NULL AND ? IS NULL))
+    """, (fault_phenomenon, device_model, device_model))
+
+    existing = cursor.fetchone()
+
+    if existing:
+        cursor.execute("""
+            UPDATE memory
+            SET solution = ?, confidence = ?, last_accessed_at = datetime('now')
+            WHERE id = ?
+        """, (solution, confidence, existing[0]))
+        mid = existing[0]
+    else:
+        cursor.execute("""
+            INSERT INTO memory (device_model, fault_phenomenon, solution, source_ticket, confidence)
+            VALUES (?, ?, ?, ?, ?)
+        """, (device_model, fault_phenomenon, solution, source_ticket, confidence))
+        mid = cursor.lastrowid
+
+    conn.commit()
+    conn.close()
+    return mid
 if __name__ == "__main__":
     print("=== 已注册工具 ===")
     for t in list_tools():

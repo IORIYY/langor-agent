@@ -64,10 +64,11 @@ PLANNER_PROMPT = """你是工业设备运维 Agent 的任务规划器。
 - workorder_analysis：工单统计分析（参数：stat_type, top_n）
 - bom_version_trace：BOM 工艺版本追溯（参数：product_code, need_version_compare）
 - wecom_chat_fetch：企业微信聊天经验检索（参数：query, top_k）
+- memory_search：长期记忆检索，Agent 自己沉淀的经验（参数：fault_phenomenon, device_model）
 
 规则：
 1. 只输出任务计划和工具调用计划，不输出任何业务答案
-2. 故障诊断类问题规划：rag_search + fault_case_match + wecom_chat_fetch
+2. 故障诊断类问题规划：rag_search + fault_case_match + wecom_chat_fetch + memory_search
 3. 简单知识查询只规划 rag_search
 4. 工单统计类问题规划 workorder_analysis
 5. BOM/工艺查询规划 bom_version_trace

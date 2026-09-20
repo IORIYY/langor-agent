@@ -239,5 +239,24 @@ BOM 数据：
     state["sources"] = list(set(sources))
     state["step_count"] = state.get("step_count", 0) + 1
 
+    # ============ 写入长期记忆 ============
+    try:
+        from agent.tools import memory_save
+        entities = state.get("extracted_entities", {})
+        device_model = entities.get("device_model", "")
+        fault_phenomenon = entities.get("fault_phenomenon", "")
+        review_status = state.get("review_result", {}).get("status")
+
+        if intent == "fault" and fault_phenomenon and review_status == "pass":
+            mid = memory_save(
+                device_model=device_model,
+                fault_phenomenon=fault_phenomenon,
+                solution=answer,
+                confidence=0.8
+            )
+            print(f"  [记忆写入] #{mid}")
+    except Exception as e:
+        print(f"  [记忆写入失败] {e}")
+
     print(f"  报告长度：{len(answer)} 字")
     return state
