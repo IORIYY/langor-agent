@@ -11,7 +11,7 @@ INTENT_PROMPT = """你是工业设备运维 Agent 的意图解析器。
 2. workorder：工单分析
    - 请求统计、分类、趋势、TOP
    - 关键词：「最常见」「统计」「多少单」「TOP」「趋势」「排名」
-   - 例：最近哪些故障最常见？ / 工单总数是多少？ / 故障 TOP 是什么？
+   - 例：最近哪些故障最常见？ / 工单总数是多少？
 
 3. bom：BOM 工艺查询
    - 请求版本、变更、物料、批次差异
@@ -20,20 +20,19 @@ INTENT_PROMPT = """你是工业设备运维 Agent 的意图解析器。
 
 4. knowledge：知识问答
    - 参数、保养、告警含义等通用问题
-   - 关键词：「参数」「设置」「多久」「含义」「是什么」
    - 例：RS485 通讯参数怎么设置？
 
 5. boundary：无关问题
    - 闲聊、天气、跟设备无关
-   - 例：你好 / 今天天气怎么样？
 
 重要：
 - 问题里只要提到具体故障现象（异常/告警/中断），优先判 fault
 - 问题里只要提到「统计/TOP/最常见/多少」，优先判 workorder
 - 问题里只要提到「BOM/版本/物料」，优先判 bom
+- 如果问题是追问（如「那怎么修」「流程呢」），参考上一轮意图
 
 同时提取关键实体：
-- device_model：设备型号（如 LBE-2000）
+- device_model：设备型号
 - fault_phenomenon：故障现象
 - product_code：产品型号
 
@@ -48,8 +47,12 @@ INTENT_PROMPT = """你是工业设备运维 Agent 的意图解析器。
   }
 }
 
+历史对话：
+__HISTORY__
+
 用户问题：__QUERY__
 """
+
 
 PLANNER_PROMPT = """你是工业设备运维 Agent 的任务规划器。
 
@@ -68,7 +71,8 @@ PLANNER_PROMPT = """你是工业设备运维 Agent 的任务规划器。
 3. 简单知识查询只规划 rag_search
 4. 工单统计类问题规划 workorder_analysis
 5. BOM/工艺查询规划 bom_version_trace
-6. 每个子任务明确指定工具和入参
+6. 如果用户是追问，参考历史对话理解意图
+7. 每个子任务明确指定工具和入参
 
 只输出 JSON。
 
@@ -80,6 +84,9 @@ PLANNER_PROMPT = """你是工业设备运维 Agent 的任务规划器。
     {"tool": "fault_case_match", "params": {"fault_phenomenon": "..."}}
   ]
 }
+
+历史对话：
+__HISTORY__
 
 用户问题：__QUERY__
 意图：__INTENT__

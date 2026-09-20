@@ -29,12 +29,28 @@ def _parse_json(text: str) -> dict:
         return {}
 
 
+def _format_history(chat_history: list, max_turns: int = 3) -> str:
+    """格式化历史对话（最近 N 轮）"""
+    if not chat_history:
+        return "（无历史对话）"
+    recent = chat_history[-max_turns * 2:]
+    lines = []
+    for msg in recent:
+        role = "用户" if msg["role"] == "user" else "助手"
+        content = msg["content"][:200]
+        lines.append(f"{role}：{content}")
+    return "\n".join(lines)
+
+
 def intent_node(state: AgentState) -> AgentState:
     """节点1：意图解析"""
     print("[IntentNode] 解析意图...")
     query = state["user_query"]
+    history = state.get("chat_history", [])
 
-    prompt = INTENT_PROMPT.replace("__QUERY__", query)
+    history_text = _format_history(history)
+    prompt = INTENT_PROMPT.replace("__QUERY__", query).replace("__HISTORY__", history_text)
+
     try:
         output = call_llm(prompt)
         parsed = _parse_json(output)
@@ -57,10 +73,14 @@ def planner_node(state: AgentState) -> AgentState:
     query = state["user_query"]
     intent = state.get("intent_type", "fault")
     entities = state.get("extracted_entities", {})
+    history = state.get("chat_history", [])
 
+    history_text = _format_history(history)
     prompt = PLANNER_PROMPT.replace("__QUERY__", query) \
                             .replace("__INTENT__", intent) \
-                            .replace("__ENTITIES__", json.dumps(entities, ensure_ascii=False))
+                            .replace("__ENTITIES__", json.dumps(entities, ensure_ascii=False)) \
+                            .replace("__HISTORY__", history_text)
+
     try:
         output = call_llm(prompt)
         parsed = _parse_json(output)
@@ -104,7 +124,6 @@ def executor_node(state: AgentState) -> AgentState:
             "error": result.get("error")
         })
 
-               # success 和 fallback 都算有效返回（fallback 可能没结果）
         if status in ("success", "fallback"):
             all_docs.extend(results)
 
@@ -183,7 +202,6 @@ def output_formatter_node(state: AgentState) -> AgentState:
    - 【来源】数据来源
 3. 不要输出「排查步骤」「所需配件」「安全提示」这些诊断类内容
 4. 用简洁中文，控制在 300 字以内
-5. 直接输出报告，不要复述指令
 
 用户问题：{query}
 统计数据：
@@ -204,7 +222,6 @@ def output_formatter_node(state: AgentState) -> AgentState:
    - 【来源】数据来源
 3. 不要输出「排查步骤」「安全提示」这些诊断类内容
 4. 用简洁中文，控制在 300 字以内
-5. 直接输出报告，不要复述指令
 
 用户问题：{query}
 BOM 数据：
