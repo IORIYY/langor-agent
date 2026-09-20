@@ -56,8 +56,13 @@ def evaluate(case: dict) -> dict:
     else:
         sensitive_ok = True
 
-        # 综合判定：意图 + 要点命中为主，工具和敏感词作为辅助
-    overall = intent_ok and points_ok and sensitive_ok
+          # 综合判定：
+    # - 敏感题：只看 blocked
+    # - 其他：意图 + 要点 + 敏感
+    if case.get("is_sensitive"):
+        overall = sensitive_ok and intent_ok
+    else:
+        overall = intent_ok and points_ok and sensitive_ok
     return {
         "id": case["id"],
         "query": q,
