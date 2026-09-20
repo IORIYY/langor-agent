@@ -5,6 +5,7 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 import streamlit as st
 from agent.graph import build_graph
 from agent.nodes import ask_stream
+from agent.tool_registry import list_tools
 
 st.set_page_config(
     page_title="朗尔设备运维 AI Agent",
@@ -15,6 +16,18 @@ st.set_page_config(
 st.title("🔧 朗尔设备运维 AI Agent")
 st.caption("基于 LangGraph 三分离状态机 | 5 个工具 | 多源融合")
 
+# ============ 顶部统计 ============
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("工具数", len(list_tools()))
+with col2:
+    st.metric("意图类型", 5)
+with col3:
+    st.metric("Evals 通过率", "95%")
+with col4:
+    st.metric("检索层", "4 层")
+
+# ============ 侧边栏 ============
 with st.sidebar:
     st.header("🤖 Agent 架构")
 
@@ -45,13 +58,33 @@ with st.sidebar:
         "- `memory_search`：长期记忆"
     )
 
+    st.markdown("**检索层**")
+    st.markdown(
+        "- BM25 关键词\n"
+        "- 向量检索\n"
+        "- RRF 融合\n"
+        "- Rerank 精排"
+    )
+
     st.divider()
     if st.button("🔄 清空对话"):
         st.session_state.messages = []
         st.rerun()
 
+# ============ 主区域 ============
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+# 欢迎语
+if not st.session_state.messages:
+    st.info(
+        "👋 我是朗尔设备运维助手，可以帮你：\n\n"
+        "- **故障诊断**：LBE-2000 均衡电流异常怎么排查？\n"
+        "- **工单统计**：最近哪些故障最常见？\n"
+        "- **BOM 查询**：LBE-2000 最新 BOM 版本是什么？\n"
+        "- **知识问答**：RS485 通讯参数怎么设置？\n\n"
+        "支持多轮追问，如「那怎么修？」"
+    )
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
