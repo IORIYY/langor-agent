@@ -294,3 +294,49 @@ BOM 数据：
 
     print(f"  报告长度：{len(answer)} 字")
     return state
+def ask_stream(state: AgentState):
+    """
+    流式版 ask：yield Agent 执行过程的中间状态。
+    每 yield 一次，前端展示一次进度。
+    """
+    from agent.graph import build_graph
+
+    app = build_graph()
+
+    # 逐步执行，每步 yield 一次进度
+    steps = ["intent", "planner", "executor", "reviewer", "output"]
+    step_names = {
+        "intent": "意图识别",
+        "planner": "任务规划",
+        "executor": "工具执行",
+        "reviewer": "独立评审",
+        "output": "生成报告"
+    }
+
+    current_state = dict(state)
+    current_state["step_count"] = current_state.get("step_count", 0)
+
+    for step in steps:
+        yield {"type": "step", "step": step, "name": step_names[step]}
+
+        # 只跑当前节点
+        if step == "intent":
+            current_state = intent_node(current_state)
+        elif step == "planner":
+            # 敏感词拦截，跳过后续
+            if current_state.get("blocked"):
+                yield {"type": "blocked", "reason": "sensitive"}
+                return
+            current_state = planner_node(current_state)
+        elif step == "executor":
+            current_state = executor_node(current_state)
+        elif step == "reviewer":
+            current_state = reviewer_node(current_state)
+            # 评审不通过，直接输出
+            status = current_state.get("review_result", {}).get("status")
+            if status == "fail":
+                yield {"type": "review_fail", "reason": current_state["review_result"].get("reason")}
+        elif step == "output":
+            current_state = output_formatter_node(current_state)
+
+    yield {"type": "done", "result": current_state}
