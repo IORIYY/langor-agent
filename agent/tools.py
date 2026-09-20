@@ -295,8 +295,17 @@ MEMORY_DB = "data/memory.db"
         "top_k": "返回条数，默认 2"
     }
 )
+@register_tool(
+    name="memory_search",
+    description="从长期记忆中检索相似故障的处理方案（Agent 自己沉淀的经验）",
+    params_schema={
+        "fault_phenomenon": "故障现象描述",
+        "device_model": "设备型号（可选）",
+        "top_k": "返回条数，默认 2"
+    }
+)
 def memory_search(fault_phenomenon: str, device_model: str = None, top_k: int = 2) -> dict:
-    """工具6：长期记忆检索"""
+    """工具6：长期记忆检索（带软遗忘）"""
     try:
         conn = sqlite3.connect(MEMORY_DB)
         cursor = conn.cursor()
@@ -312,13 +321,14 @@ def memory_search(fault_phenomenon: str, device_model: str = None, top_k: int = 
             query += " AND device_model = ?"
             params.append(device_model)
 
-        query += " ORDER BY confidence DESC, access_count DESC LIMIT ?"
+        # 软遗忘：按「置信度 × 访问热度」排序，不再简单按 confidence
+        # 热度公式：1 + log(1 + access_count)
+        query += " ORDER BY (confidence * (1 + 0.5 * access_count)) DESC LIMIT ?"
         params.append(top_k)
 
         cursor.execute(query, params)
         rows = cursor.fetchall()
 
-        # 更新访问计数
         if rows:
             ids = [row[0] for row in rows]
             placeholders = ",".join("?" * len(ids))
@@ -352,31 +362,57 @@ def memory_search(fault_phenomenon: str, device_model: str = None, top_k: int = 
         }
 
 
+def _summarize_if_too_long(solution: str, max_len: int = 500) -> str:
+    """如果方案超过 max_len，调用 LLM 摘要"""
+    if len(solution) <= max_len:
+        return solution
+
+    try:
+        from agent.llm import call_llm
+        prompt = f"""请把以下故障处理方案压缩到 300 字以内，保留关键信息（根因、排查步骤、配件）。
+
+原文：
+{solution}
+
+压缩后：
+"""
+        summary = call_llm(prompt)
+        return summary.strip()
+    except Exception as e:
+        print(f"[记忆压缩失败] {e}")
+        return solution[:max_len] + "..."
+
+
 def memory_save(device_model: str, fault_phenomenon: str, solution: str,
                 source_ticket: str = None, confidence: float = 0.8) -> int:
     """
-    写入长期记忆（非工具，由系统在 Agent 输出后调用）。
+    写入长期记忆（含压缩和去重）。
 
     返回新记录 ID。
     """
+    # 压缩过长内容
+    solution = _summarize_if_too_long(solution)
+
     conn = sqlite3.connect(MEMORY_DB)
     cursor = conn.cursor()
 
-    # 去重检查：相同故障现象 + 设备型号，更新而非新增
+    # 去重检查
     cursor.execute("""
-        SELECT id FROM memory
+        SELECT id, confidence FROM memory
         WHERE fault_phenomenon = ? AND (device_model = ? OR (device_model IS NULL AND ? IS NULL))
     """, (fault_phenomenon, device_model, device_model))
 
     existing = cursor.fetchone()
 
     if existing:
+        mid, old_conf = existing
+        # 置信度取较高值
+        new_conf = max(old_conf, confidence)
         cursor.execute("""
             UPDATE memory
             SET solution = ?, confidence = ?, last_accessed_at = datetime('now')
             WHERE id = ?
-        """, (solution, confidence, existing[0]))
-        mid = existing[0]
+        """, (solution, new_conf, mid))
     else:
         cursor.execute("""
             INSERT INTO memory (device_model, fault_phenomenon, solution, source_ticket, confidence)
@@ -387,31 +423,3 @@ def memory_save(device_model: str, fault_phenomenon: str, solution: str,
     conn.commit()
     conn.close()
     return mid
-if __name__ == "__main__":
-    print("=== 已注册工具 ===")
-    for t in list_tools():
-        print(f"- {t['name']}: {t['description']}")
-
-    print("\n=== 测试 workorder_analysis ===")
-    r = execute_tool("workorder_analysis", {"stat_type": "summary"})
-    print(f"状态：{r['status']}")
-    for item in r["results"]:
-        print(f"\n{item['content']}")
-
-    print("\n=== 测试 fault_case_match ===")
-    r = execute_tool("fault_case_match", {"fault_phenomenon": "均衡电流异常"})
-    print(f"状态：{r['status']}")
-    print(f"结果数：{len(r['results'])}")
-
-    print("\n=== 测试 bom_version_trace ===")
-    r = execute_tool("bom_version_trace", {"product_code": "LBE-2000"})
-    print(f"状态：{r['status']}")
-    for item in r["results"]:
-        print(f"\n{item['content']}")
-
-    print("\n=== 测试 wecom_chat_fetch ===")
-    r = execute_tool("wecom_chat_fetch", {"query": "均衡电流"})
-    print(f"状态：{r['status']}")
-    print(f"结果数：{len(r['results'])}")
-    for item in r["results"]:
-        print(f"  {item['content']}")
