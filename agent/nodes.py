@@ -11,6 +11,9 @@ from agent.tool_registry import execute_tool
 import agent.tools  # 触发 @register_tool 装饰器
 
 
+SENSITIVE_WORDS = ["炸", "自杀", "毒品", "代考", "作弊", "黑客", "杀人"]
+
+
 def _parse_json(text: str) -> dict:
     """从 LLM 输出中提取 JSON"""
     text = text.strip()
@@ -42,15 +45,11 @@ def _format_history(chat_history: list, max_turns: int = 3) -> str:
     return "\n".join(lines)
 
 
-SENSITIVE_WORDS = ["炸", "自杀", "毒品", "代考", "作弊", "黑客", "杀人"]
-
-
 def intent_node(state: AgentState) -> AgentState:
     """节点1：意图解析（含敏感词前置拦截）"""
     print("[IntentNode] 解析意图...")
     query = state["user_query"]
 
-    # 敏感词前置拦截
     if any(w in query for w in SENSITIVE_WORDS):
         print(f"  [敏感词拦截] {query}")
         state["intent_type"] = "boundary"
@@ -64,8 +63,6 @@ def intent_node(state: AgentState) -> AgentState:
         return state
 
     history = state.get("chat_history", [])
-    history = state.get("chat_history", [])
-
     history_text = _format_history(history)
     prompt = INTENT_PROMPT.replace("__QUERY__", query).replace("__HISTORY__", history_text)
 
@@ -193,11 +190,30 @@ def output_formatter_node(state: AgentState) -> AgentState:
     query = state["user_query"]
     intent = state.get("intent_type", "fault")
     docs = state.get("retrieved_docs", [])
+    blocked = state.get("blocked", False)
 
-    if not docs:
-        state["final_answer"] = "资料不足，无法生成报告。建议人工排查。"
+    # 敏感词拦截：直接输出拒答
+    if blocked:
+        state["final_answer"] = "这个问题我不太方便回答。如果有设备故障或运维问题，可以换个问题问我。"
         state["sources"] = []
         state["step_count"] = state.get("step_count", 0) + 1
+        return state
+
+    # 无检索结果：分情况
+    if not docs:
+        if intent == "boundary":
+            state["final_answer"] = (
+                "我是工业设备运维助手，主要帮你排查设备故障。\n\n"
+                "你可以这样问我：\n"
+                "- LBE-2000 均衡电流异常怎么排查？\n"
+                "- 最近哪些故障最常见？\n"
+                "- LBE-2000 最新 BOM 版本是什么？"
+            )
+        else:
+            state["final_answer"] = "资料不足，无法生成报告。建议人工排查。"
+        state["sources"] = []
+        state["step_count"] = state.get("step_count", 0) + 1
+        print(f"  [无检索结果] intent={intent}，输出兜底话术")
         return state
 
     context_parts = []

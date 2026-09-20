@@ -1,9 +1,14 @@
 import os
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
+# 默认走镜像，支持通过环境变量强制离线
+if os.environ.get("HF_HUB_OFFLINE") == "1":
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+else:
+    os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
-
 
 PERSIST_DIR = "data/chroma_db"
 EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
@@ -28,16 +33,6 @@ def _get_vectorstore():
 
 
 def vector_search(query: str, top_k: int = 3) -> list:
-    """
-    向量检索。
-
-    返回格式：
-    [
-        {"content": "...", "source": "...", "score": 0.411},
-        ...
-    ]
-    注意：score 是距离，越小越相关。
-    """
     vs = _get_vectorstore()
     results = vs.similarity_search_with_score(query, k=top_k)
     return [
@@ -51,7 +46,7 @@ def vector_search(query: str, top_k: int = 3) -> list:
 
 
 if __name__ == "__main__":
-    for q in ["均衡电流异常", "通讯中断", "终端电阻", "绝缘告警"]:
+    for q in ["均衡电流异常", "通讯中断"]:
         print(f"\n问题：{q}")
         for r in vector_search(q, top_k=2):
             print(f"  [dist={r['score']:.3f}] {r['source']}")
