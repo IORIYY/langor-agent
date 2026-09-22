@@ -1,11 +1,6 @@
 import os
-
-# 默认走镜像，支持通过环境变量强制离线
-if os.environ.get("HF_HUB_OFFLINE") == "1":
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
-else:
-    os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -32,9 +27,20 @@ def _get_vectorstore():
     return _vectorstore
 
 
-def vector_search(query: str, top_k: int = 3) -> list:
+def vector_search(query: str, top_k: int = 3, device_model: str = None) -> list:
+    """
+    向量检索，支持按设备型号过滤。
+    """
     vs = _get_vectorstore()
-    results = vs.similarity_search_with_score(query, k=top_k)
+
+    if device_model:
+        results = vs.similarity_search_with_score(
+            query, k=top_k,
+            filter={"source": {"$contains": device_model}}
+        )
+    else:
+        results = vs.similarity_search_with_score(query, k=top_k)
+
     return [
         {
             "content": doc.page_content,

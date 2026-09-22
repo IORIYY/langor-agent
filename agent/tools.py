@@ -6,6 +6,7 @@ from agent.tool_registry import register_tool, execute_tool, list_tools, get_too
 TICKETS_DB = "data/tickets.db"
 BOM_DB = "data/bom.db"
 WECOM_DB = "data/wecom.db"
+MEMORY_DB = "data/memory.db"
 
 
 @register_tool(
@@ -283,21 +284,10 @@ def wecom_chat_fetch(query: str, top_k: int = 2) -> dict:
             "fallback_reason": "wecom_db_unavailable"
         }
 
-MEMORY_DB = "data/memory.db"
-
 
 @register_tool(
     name="memory_search",
-    description="从长期记忆中检索相似故障的处理方案（Agent 自己沉淀的经验）",
-    params_schema={
-        "fault_phenomenon": "故障现象描述",
-        "device_model": "设备型号（可选）",
-        "top_k": "返回条数，默认 2"
-    }
-)
-@register_tool(
-    name="memory_search",
-    description="从长期记忆中检索相似故障的处理方案（Agent 自己沉淀的经验）",
+    description="从长期记忆中检索相似故障的处理方案（仅已审核通过）",
     params_schema={
         "fault_phenomenon": "故障现象描述",
         "device_model": "设备型号（可选）",
@@ -305,7 +295,7 @@ MEMORY_DB = "data/memory.db"
     }
 )
 def memory_search(fault_phenomenon: str, device_model: str = None, top_k: int = 2) -> dict:
-    """工具6：长期记忆检索（带软遗忘）"""
+    """工具6：长期记忆检索（仅查 verified=1）"""
     try:
         conn = sqlite3.connect(MEMORY_DB)
         cursor = conn.cursor()
@@ -313,7 +303,7 @@ def memory_search(fault_phenomenon: str, device_model: str = None, top_k: int = 
         query = """
             SELECT id, device_model, fault_phenomenon, solution, confidence, access_count
             FROM memory
-            WHERE fault_phenomenon LIKE ?
+            WHERE verified = 1 AND fault_phenomenon LIKE ?
         """
         params = [f"%{fault_phenomenon}%"]
 
@@ -321,8 +311,6 @@ def memory_search(fault_phenomenon: str, device_model: str = None, top_k: int = 
             query += " AND device_model = ?"
             params.append(device_model)
 
-        # 软遗忘：按「置信度 × 访问热度」排序，不再简单按 confidence
-        # 热度公式：1 + log(1 + access_count)
         query += " ORDER BY (confidence * (1 + 0.5 * access_count)) DESC LIMIT ?"
         params.append(top_k)
 
@@ -386,17 +374,13 @@ def _summarize_if_too_long(solution: str, max_len: int = 500) -> str:
 def memory_save(device_model: str, fault_phenomenon: str, solution: str,
                 source_ticket: str = None, confidence: float = 0.8) -> int:
     """
-    写入长期记忆（含压缩和去重）。
-
-    返回新记录 ID。
+    写入候选记忆（verified=0，不自动进入正式检索）。
     """
-    # 压缩过长内容
     solution = _summarize_if_too_long(solution)
 
     conn = sqlite3.connect(MEMORY_DB)
     cursor = conn.cursor()
 
-    # 去重检查
     cursor.execute("""
         SELECT id, confidence FROM memory
         WHERE fault_phenomenon = ? AND (device_model = ? OR (device_model IS NULL AND ? IS NULL))
@@ -406,7 +390,6 @@ def memory_save(device_model: str, fault_phenomenon: str, solution: str,
 
     if existing:
         mid, old_conf = existing
-        # 置信度取较高值
         new_conf = max(old_conf, confidence)
         cursor.execute("""
             UPDATE memory
@@ -415,11 +398,42 @@ def memory_save(device_model: str, fault_phenomenon: str, solution: str,
         """, (solution, new_conf, mid))
     else:
         cursor.execute("""
-            INSERT INTO memory (device_model, fault_phenomenon, solution, source_ticket, confidence)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO memory (device_model, fault_phenomenon, solution, source_ticket, confidence, verified)
+            VALUES (?, ?, ?, ?, ?, 0)
         """, (device_model, fault_phenomenon, solution, source_ticket, confidence))
         mid = cursor.lastrowid
 
     conn.commit()
     conn.close()
     return mid
+
+
+if __name__ == "__main__":
+    print("=== 已注册工具 ===")
+    for t in list_tools():
+        print(f"- {t['name']}: {t['description']}")
+
+    print("\n=== 测试 workorder_analysis ===")
+    r = execute_tool("workorder_analysis", {"stat_type": "summary"})
+    print(f"状态：{r['status']}")
+    for item in r["results"]:
+        print(f"\n{item['content']}")
+
+    print("\n=== 测试 fault_case_match ===")
+    r = execute_tool("fault_case_match", {"fault_phenomenon": "均衡电流异常"})
+    print(f"状态：{r['status']}")
+    print(f"结果数：{len(r['results'])}")
+
+    print("\n=== 测试 bom_version_trace ===")
+    r = execute_tool("bom_version_trace", {"product_code": "LBE-2000"})
+    print(f"状态：{r['status']}")
+
+    print("\n=== 测试 wecom_chat_fetch ===")
+    r = execute_tool("wecom_chat_fetch", {"query": "均衡电流"})
+    print(f"状态：{r['status']}")
+    print(f"结果数：{len(r['results'])}")
+
+    print("\n=== 测试 memory_search ===")
+    r = execute_tool("memory_search", {"fault_phenomenon": "均衡电流"})
+    print(f"状态：{r['status']}")
+    print(f"结果数：{len(r['results'])}")

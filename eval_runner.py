@@ -29,7 +29,8 @@ def evaluate(case: dict) -> dict:
     duration = time.time() - start
 
     actual_intent = result.get("intent_type", "unknown")
-    actual_tools = [t.get("tool") for t in result.get("planned_tools", [])]
+    tool_records = result.get("tool_records", [])
+    actual_tools = [t["tool_name"] for t in tool_records if t.get("status") in ("success", "fallback")]
     answer = result.get("final_answer", "")
     review_status = result.get("review_result", {}).get("status", "unknown")
     blocked = result.get("blocked", False)

@@ -25,6 +25,7 @@ class AgentState(TypedDict, total=False):
 
     # 控制
     step_count: int
+    retrieval_attempts: int
     error: Optional[str]
 
     # 拦截

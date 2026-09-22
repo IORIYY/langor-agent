@@ -1,3 +1,10 @@
+from agent.prompts import (
+    INTENT_PROMPT,
+    PLANNER_PROMPT,
+    REVIEWER_PROMPT,
+    OUTPUT_PROMPT,
+    ANSWER_CHECK_PROMPT,
+)
 import json
 from agent.state import AgentState
 from agent.llm import call_llm
@@ -15,7 +22,7 @@ SENSITIVE_WORDS = ["炸", "自杀", "毒品", "代考", "作弊", "黑客", "杀
 
 
 def _parse_json(text: str) -> dict:
-    """从 LLM 输出中提取 JSON"""
+    """从 LLM 输出中提取 JSON，失败返回 {"status": "error"}"""
     text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -25,11 +32,14 @@ def _parse_json(text: str) -> dict:
     if start != -1 and end != -1:
         text = text[start:end+1]
     try:
-        return json.loads(text)
+        result = json.loads(text)
+        if not isinstance(result, dict):
+            return {"status": "error", "reason": "非字典输出"}
+        return result
     except Exception as e:
         print(f"[JSON解析失败] {e}")
         print(f"[原始输出] {text[:200]}")
-        return {}
+        return {"status": "error", "reason": f"JSON解析失败：{e}"}
 
 
 def _format_history(chat_history: list, max_turns: int = 3) -> str:
@@ -146,10 +156,16 @@ def executor_node(state: AgentState) -> AgentState:
     state["retrieved_docs"] = all_docs
     state["step_count"] = state.get("step_count", 0) + 1
 
+    # 检索次数 +1（只有真正执行检索工具时才加）
+    has_search = any(t["tool_name"] in ("rag_search", "fault_case_match", "memory_search")
+                     for t in tool_records)
+    if has_search:
+        state["retrieval_attempts"] = state.get("retrieval_attempts", 0) + 1
+
     print(f"  工具调用：{len(tool_records)} 次")
     print(f"  检索到：{len(all_docs)} 个片段")
+    print(f"  检索轮次：{state.get('retrieval_attempts', 0)}")
     return state
-
 
 def reviewer_node(state: AgentState) -> AgentState:
     """节点4：独立评审"""
@@ -175,14 +191,18 @@ def reviewer_node(state: AgentState) -> AgentState:
         parsed = _parse_json(output)
     except Exception as e:
         print(f"[ReviewerNode错误] {e}")
-        parsed = {"status": "pass", "reason": "解析失败，默认通过"}
+        # 评审异常 → fail，不放行
+        parsed = {"status": "error", "reason": f"评审调用异常：{e}"}
+
+    # 如果解析失败，不返回 pass
+    if parsed.get("status") not in ("pass", "need_more_info", "fail", "error"):
+        parsed = {"status": "error", "reason": "评审输出非法"}
 
     state["review_result"] = parsed
     state["step_count"] = state.get("step_count", 0) + 1
 
     print(f"  评审：{parsed.get('status')} - {parsed.get('reason', '')[:50]}")
     return state
-
 
 def output_formatter_node(state: AgentState) -> AgentState:
     """节点5：格式化输出"""
@@ -340,3 +360,45 @@ def ask_stream(state: AgentState):
             current_state = output_formatter_node(current_state)
 
     yield {"type": "done", "result": current_state}
+def answer_check_node(state: AgentState) -> AgentState:
+    """节点6：答案二次校验"""
+    print("[AnswerCheckNode] 校验答案...")
+    query = state["user_query"]
+    answer = state.get("final_answer", "")
+    docs = state.get("retrieved_docs", [])
+
+    if not answer or not docs:
+        state["step_count"] = state.get("step_count", 0) + 1
+        return state
+
+    # 答案很短，跳过校验
+    if len(answer) < 100:
+        state["step_count"] = state.get("step_count", 0) + 1
+        return state
+
+    context_parts = []
+    for d in docs:
+        context_parts.append(f"【{d['source']}】\n{d['content']}")
+    context = "\n\n".join(context_parts)
+
+    prompt = ANSWER_CHECK_PROMPT.replace("__QUERY__", query) \
+                                 .replace("__ANSWER__", answer) \
+                                 .replace("__CONTEXT__", context)
+
+    try:
+        output = call_llm(prompt)
+        parsed = _parse_json(output)
+    except Exception as e:
+        print(f"[AnswerCheckNode错误] {e}")
+        parsed = {"status": "error", "reason": str(e)}
+
+    status = parsed.get("status", "error")
+
+    if status == "fail":
+        print(f"  [答案校验失败] {parsed.get('reason', '')[:50]}")
+        # 加警示
+        state["final_answer"] = answer + "\n\n⚠️ 注：以上部分结论未在资料中直接找到，请人工复核。"
+
+    state["step_count"] = state.get("step_count", 0) + 1
+    print(f"  答案校验：{status}")
+    return state

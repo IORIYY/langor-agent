@@ -3,8 +3,7 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 import streamlit as st
-from agent.graph import build_graph
-from agent.nodes import ask_stream
+from agent.service import invoke
 from agent.tool_registry import list_tools
 
 st.set_page_config(
@@ -14,9 +13,8 @@ st.set_page_config(
 )
 
 st.title("🔧 朗尔设备运维 AI Agent")
-st.caption("基于 LangGraph 三分离状态机 | 5 个工具 | 多源融合")
+st.caption("基于 LangGraph 三分离状态机 | 6 个工具 | 多源融合")
 
-# ============ 顶部统计 ============
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric("工具数", len(list_tools()))
@@ -27,7 +25,6 @@ with col3:
 with col4:
     st.metric("检索层", "4 层")
 
-# ============ 侧边栏 ============
 with st.sidebar:
     st.header("🤖 Agent 架构")
 
@@ -48,7 +45,7 @@ with st.sidebar:
         language="text"
     )
 
-    st.markdown("**5 个工具**")
+    st.markdown("**6 个工具**")
     st.markdown(
         "- `rag_search`：知识库混合检索\n"
         "- `fault_case_match`：历史工单\n"
@@ -58,32 +55,21 @@ with st.sidebar:
         "- `memory_search`：长期记忆"
     )
 
-    st.markdown("**检索层**")
-    st.markdown(
-        "- BM25 关键词\n"
-        "- 向量检索\n"
-        "- RRF 融合\n"
-        "- Rerank 精排"
-    )
-
     st.divider()
     if st.button("🔄 清空对话"):
         st.session_state.messages = []
         st.rerun()
 
-# ============ 主区域 ============
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 欢迎语
 if not st.session_state.messages:
     st.info(
         "👋 我是朗尔设备运维助手，可以帮你：\n\n"
         "- **故障诊断**：LBE-2000 均衡电流异常怎么排查？\n"
         "- **工单统计**：最近哪些故障最常见？\n"
         "- **BOM 查询**：LBE-2000 最新 BOM 版本是什么？\n"
-        "- **知识问答**：RS485 通讯参数怎么设置？\n\n"
-        "支持多轮追问，如「那怎么修？」"
+        "- **知识问答**：RS485 通讯参数怎么设置？"
     )
 
 for msg in st.session_state.messages:
@@ -105,58 +91,45 @@ if prompt := st.chat_input("输入问题，如：LBE-2000 均衡电流异常怎�
         ]
 
         with st.status("🤖 Agent 正在处理...", expanded=True) as status:
-            final_result = None
-            for event in ask_stream({
-                "user_query": prompt,
-                "step_count": 0,
-                "chat_history": chat_history
-            }):
-                if event["type"] == "step":
-                    st.write(f"▶ {event['name']}...")
-                elif event["type"] == "blocked":
-                    st.write("⛔ 敏感词拦截")
-                elif event["type"] == "review_fail":
-                    st.write(f"⚠️ 评审未通过：{event['reason']}")
-                elif event["type"] == "done":
-                    final_result = event["result"]
-                    status.update(label="✅ 完成", state="complete", expanded=False)
+            st.write("▶ 调用统一服务入口...")
+            final_result = invoke(prompt, chat_history=chat_history)
+            status.update(label="✅ 完成", state="complete", expanded=False)
 
-        if final_result:
-            answer = (final_result.get("final_answer") or "").strip()
-            if not answer:
-                if final_result.get("blocked"):
-                    answer = "这个问题我不太方便回答。"
-                elif final_result.get("intent_type") == "boundary":
-                    answer = "我是工业设备运维助手，主要帮你排查设备故障。"
-                else:
-                    answer = "资料不足，无法生成报告。"
+        answer = (final_result.get("final_answer") or "").strip()
+        if not answer:
+            if final_result.get("blocked"):
+                answer = "这个问题我不太方便回答。"
+            elif final_result.get("intent_type") == "boundary":
+                answer = "我是工业设备运维助手，主要帮你排查设备故障。"
+            else:
+                answer = "资料不足，无法生成报告。"
 
-            st.markdown(answer)
+        st.markdown(answer)
 
-            intent = final_result.get("intent_type", "-")
-            tools = [t.get("tool") for t in final_result.get("planned_tools", [])]
-            sources = final_result.get("sources", [])
-            review = final_result.get("review_result", {})
-            blocked = final_result.get("blocked", False)
+        intent = final_result.get("intent_type", "-")
+        tools = [t.get("tool") for t in final_result.get("planned_tools", [])]
+        sources = final_result.get("sources", [])
+        review = final_result.get("review_result", {})
+        blocked = final_result.get("blocked", False)
 
-            meta = {
-                "意图": intent,
-                "工具": tools,
-                "来源": sources,
-                "评审": review,
-                "敏感拦截": blocked
-            }
+        meta = {
+            "意图": intent,
+            "工具": tools,
+            "来源": sources,
+            "评审": review,
+            "敏感拦截": blocked
+        }
 
-            if sources:
-                with st.expander("📚 来源详情"):
-                    for s in sources:
-                        st.write(f"- {s}")
+        if sources:
+            with st.expander("📚 来源详情"):
+                for s in sources:
+                    st.write(f"- {s}")
 
-            with st.expander("🔍 完整执行细节"):
-                st.json(meta)
+        with st.expander("🔍 完整执行细节"):
+            st.json(meta)
 
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": answer,
-                "meta": meta
-            })
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": answer,
+            "meta": meta
+        })
