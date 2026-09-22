@@ -28,9 +28,7 @@ def _get_vectorstore():
 
 
 def vector_search(query: str, top_k: int = 3, device_model: str = None) -> list:
-    """
-    向量检索，支持按设备型号过滤。
-    """
+    """向量检索，支持按设备型号过滤"""
     vs = _get_vectorstore()
 
     if device_model:
